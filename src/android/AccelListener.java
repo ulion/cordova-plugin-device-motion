@@ -50,12 +50,13 @@ public class AccelListener extends CordovaPlugin implements SensorEventListener 
     public static int ERROR_FAILED_TO_START = 3;
 
     private float x,y,z;                                // most recent acceleration values
+    private int typeIdx;                                // the sensor type index of data x,y,z
     private long timestamp;                         // time of most recent value
     private int status;                                 // status of listener
     private int accuracy = SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM;
+    private int[] sensorTypes = {Sensor.TYPE_ACCELEROMETER, Sensor.TYPE_LINEAR_ACCELERATION};
 
     private SensorManager sensorManager;    // Sensor manager
-    private Sensor mSensor;                           // Acceleration sensor returned by sensor manager
 
     private CallbackContext callbackContext;              // Keeps track of the JS callback context.
 
@@ -149,20 +150,24 @@ public class AccelListener extends CordovaPlugin implements SensorEventListener 
         this.setStatus(AccelListener.STARTING);
 
         // Get accelerometer from sensor manager
-        List<Sensor> list = this.sensorManager.getSensorList(Sensor.TYPE_ACCELEROMETER);
+        List<Sensor> list = this.sensorManager.getSensorList(Sensor.TYPE_ALL);
 
         // If found, then register as listener
+        boolean anySensor = false;
         if ((list != null) && (list.size() > 0)) {
-          this.mSensor = list.get(0);
-          if (this.sensorManager.registerListener(this, this.mSensor, SensorManager.SENSOR_DELAY_UI)) {
-              this.setStatus(AccelListener.STARTING);
-          } else {
-              this.setStatus(AccelListener.ERROR_FAILED_TO_START);
-              this.fail(AccelListener.ERROR_FAILED_TO_START, "Device sensor returned an error.");
-              return this.status;
-          };
-
-        } else {
+            for (Sensor sensor: list) {
+                int type = sensor.getType();
+                if (getSensorTypeIdx(type) < 0)
+                    continue;
+                if (!this.sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_UI)) {
+                    this.setStatus(AccelListener.ERROR_FAILED_TO_START);
+                    this.fail(AccelListener.ERROR_FAILED_TO_START, "Device sensor returned an error.");
+                    return this.status;
+                }
+                anySensor = true;
+            }
+        }
+        if (!anySensor) {
           this.setStatus(AccelListener.ERROR_FAILED_TO_START);
           this.fail(AccelListener.ERROR_FAILED_TO_START, "No sensors found to register accelerometer listening to.");
           return this.status;
@@ -208,6 +213,15 @@ public class AccelListener extends CordovaPlugin implements SensorEventListener 
         }
     }
 
+    private int getSensorTypeIdx(int type) {
+        for (int i = 0; i < sensorTypes.length; ++i) {
+            if (type == sensorTypes[i]) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
     /**
      * Called when the accuracy of the sensor has changed.
      *
@@ -216,7 +230,7 @@ public class AccelListener extends CordovaPlugin implements SensorEventListener 
      */
     public void onAccuracyChanged(Sensor sensor, int accuracy) {
         // Only look at accelerometer events
-        if (sensor.getType() != Sensor.TYPE_ACCELEROMETER) {
+        if (getSensorTypeIdx(sensor.getType()) < 0) {
             return;
         }
 
@@ -234,9 +248,9 @@ public class AccelListener extends CordovaPlugin implements SensorEventListener 
      */
     public void onSensorChanged(SensorEvent event) {
         // Only look at accelerometer events
-        if (event.sensor.getType() != Sensor.TYPE_ACCELEROMETER) {
+        int typeIdx = getSensorTypeIdx(event.sensor.getType());
+        if (typeIdx < 0)
             return;
-        }
 
         // If not running, then just return
         if (this.status == AccelListener.STOPPED) {
@@ -251,6 +265,7 @@ public class AccelListener extends CordovaPlugin implements SensorEventListener 
             this.x = event.values[0];
             this.y = event.values[1];
             this.z = event.values[2];
+            this.typeIdx = typeIdx;
 
             this.win();
         }
@@ -297,6 +312,7 @@ public class AccelListener extends CordovaPlugin implements SensorEventListener 
             r.put("x", this.x);
             r.put("y", this.y);
             r.put("z", this.z);
+            r.put("type", typeIdx);
             r.put("timestamp", this.timestamp);
         } catch (JSONException e) {
             e.printStackTrace();
