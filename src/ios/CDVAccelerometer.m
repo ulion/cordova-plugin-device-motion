@@ -20,19 +20,36 @@
 #import <CoreMotion/CoreMotion.h>
 #import "CDVAccelerometer.h"
 
+@interface CMDeviceMotion (TransformToReferenceFrame)
+-(CMAcceleration)userAccelerationInReferenceFrame;
+@end
+
+@implementation CMDeviceMotion (TransformToReferenceFrame)
+
+-(CMAcceleration)userAccelerationInReferenceFrame
+{
+    CMAcceleration acc = [self userAcceleration];
+    CMRotationMatrix rot = [self attitude].rotationMatrix;
+
+    CMAcceleration accRef;
+    accRef.x = acc.x*rot.m11 + acc.y*rot.m12 + acc.z*rot.m13;
+    accRef.y = acc.x*rot.m21 + acc.y*rot.m22 + acc.z*rot.m23;
+    accRef.z = acc.x*rot.m31 + acc.y*rot.m32 + acc.z*rot.m33;
+
+    return accRef;
+}
+
+@end
+
 @interface CDVAccelerometer () {}
 @property (readwrite, assign) BOOL isRunning;
 @property (readwrite, assign) BOOL haveReturnedResult;
 @property (readwrite, strong) CMMotionManager* motionManager;
-@property (readwrite, assign) double x;
-@property (readwrite, assign) double y;
-@property (readwrite, assign) double z;
-@property (readwrite, assign) NSTimeInterval timestamp;
 @end
 
 @implementation CDVAccelerometer
 
-@synthesize callbackId, isRunning,x,y,z,timestamp;
+@synthesize callbackId, isRunning;
 
 // defaults to 10 msec
 #define kAccelerometerInterval 10
@@ -43,10 +60,6 @@
 {
     self = [super init];
     if (self) {
-        self.x = 0;
-        self.y = 0;
-        self.z = 0;
-        self.timestamp = 0;
         self.callbackId = nil;
         self.isRunning = NO;
         self.haveReturnedResult = YES;
@@ -70,16 +83,13 @@
         self.motionManager = [[CMMotionManager alloc] init];
     }
 
-    if ([self.motionManager isAccelerometerAvailable] == YES) {
+    if (self.motionManager.deviceMotionAvailable) {
         // Assign the update interval to the motion manager and start updates
-        [self.motionManager setAccelerometerUpdateInterval:kAccelerometerInterval/1000];  // expected in seconds
+        self.motionManager.deviceMotionUpdateInterval = kAccelerometerInterval/1000;  // expected in seconds
         __weak CDVAccelerometer* weakSelf = self;
-        [self.motionManager startAccelerometerUpdatesToQueue:[NSOperationQueue mainQueue] withHandler:^(CMAccelerometerData *accelerometerData, NSError *error) {
-            weakSelf.x = accelerometerData.acceleration.x;
-            weakSelf.y = accelerometerData.acceleration.y;
-            weakSelf.z = accelerometerData.acceleration.z;
-            weakSelf.timestamp = ([[NSDate date] timeIntervalSince1970] * 1000);
-            [weakSelf returnAccelInfo];
+        [self.motionManager startDeviceMotionUpdatesUsingReferenceFrame:CMAttitudeReferenceFrameXTrueNorthZVertical toQueue:[NSOperationQueue mainQueue] withHandler:^(CMDeviceMotion *motion, NSError *error) {
+            if (motion)
+                [weakSelf returnAccelInfo:motion];
         }];
 
         if (!self.isRunning) {
@@ -90,10 +100,10 @@
 
         NSLog(@"Running in Simulator? All gyro tests will fail.");
         CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_INVALID_ACTION messageAsString:@"Error. Accelerometer Not Available."];
-        
+
         [self.commandDelegate sendPluginResult:result callbackId:self.callbackId];
     }
-    
+
 }
 
 - (void)onReset
@@ -103,27 +113,54 @@
 
 - (void)stop:(CDVInvokedUrlCommand*)command
 {
-    if ([self.motionManager isAccelerometerAvailable] == YES) {
+    if (self.motionManager.deviceMotionAvailable) {
         if (self.haveReturnedResult == NO){
             // block has not fired before stop was called, return whatever result we currently have
-            [self returnAccelInfo];
+            //[self returnAccelInfo];
         }
-        [self.motionManager stopAccelerometerUpdates];
+        [self.motionManager stopDeviceMotionUpdates];
     }
     self.isRunning = NO;
 }
 
-- (void)returnAccelInfo
+- (void)returnAccelInfo:(CMDeviceMotion *)motion
 {
+    NSTimeInterval timestamp = ([[NSDate date] timeIntervalSince1970] * 1000);
     // Create an acceleration object
-    NSMutableDictionary* accelProps = [NSMutableDictionary dictionaryWithCapacity:4];
+    NSMutableDictionary* accelProps = [NSMutableDictionary dictionaryWithCapacity:5];
 
-    [accelProps setValue:[NSNumber numberWithDouble:self.x * kGravitationalConstant] forKey:@"x"];
-    [accelProps setValue:[NSNumber numberWithDouble:self.y * kGravitationalConstant] forKey:@"y"];
-    [accelProps setValue:[NSNumber numberWithDouble:self.z * kGravitationalConstant] forKey:@"z"];
-    [accelProps setValue:[NSNumber numberWithDouble:self.timestamp] forKey:@"timestamp"];
+    [accelProps setValue:[NSNumber numberWithDouble:(motion.userAcceleration.x + motion.gravity
+.x) * kGravitationalConstant] forKey:@"x"];
+    [accelProps setValue:[NSNumber numberWithDouble:(motion.userAcceleration.y + motion.gravity
+.y) * kGravitationalConstant] forKey:@"y"];
+    [accelProps setValue:[NSNumber numberWithDouble:(motion.userAcceleration.z + motion.gravity
+.z) * kGravitationalConstant] forKey:@"z"];
+    [accelProps setValue:[NSNumber numberWithInt:0] forKey:@"type"];
+    [accelProps setValue:[NSNumber numberWithDouble:timestamp] forKey:@"timestamp"];
 
     CDVPluginResult* result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:accelProps];
+    [result setKeepCallback:[NSNumber numberWithBool:YES]];
+    [self.commandDelegate sendPluginResult:result callbackId:self.callbackId];
+
+
+    [accelProps setValue:[NSNumber numberWithDouble:motion.userAcceleration.x * kGravitationalConstant] forKey:@"x"];
+    [accelProps setValue:[NSNumber numberWithDouble:motion.userAcceleration.y * kGravitationalConstant] forKey:@"y"];
+    [accelProps setValue:[NSNumber numberWithDouble:motion.userAcceleration.z * kGravitationalConstant] forKey:@"z"];
+    [accelProps setValue:[NSNumber numberWithInt:1] forKey:@"type"];
+
+    result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:accelProps];
+    [result setKeepCallback:[NSNumber numberWithBool:YES]];
+    [self.commandDelegate sendPluginResult:result callbackId:self.callbackId];
+
+
+    CMAcceleration accel = [motion userAccelerationInReferenceFrame];
+
+    [accelProps setValue:[NSNumber numberWithDouble:accel.x * kGravitationalConstant] forKey:@"x"];
+    [accelProps setValue:[NSNumber numberWithDouble:accel.y * kGravitationalConstant] forKey:@"y"];
+    [accelProps setValue:[NSNumber numberWithDouble:accel.z * kGravitationalConstant] forKey:@"z"];
+    [accelProps setValue:[NSNumber numberWithInt:2] forKey:@"type"];
+
+    result = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:accelProps];
     [result setKeepCallback:[NSNumber numberWithBool:YES]];
     [self.commandDelegate sendPluginResult:result callbackId:self.callbackId];
     self.haveReturnedResult = YES;

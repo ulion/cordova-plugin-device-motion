@@ -37,8 +37,8 @@ var timers = {};
 // Array of listeners; used to keep track of when we should call start and stop.
 var listeners = [];
 
-// Last returned acceleration object from native
-var accel = null;
+// Last returned acceleration objects from native
+var accelValues = [null, null];
 
 // Timer used when faking up devicemotion events
 var eventTimerId = null;
@@ -47,7 +47,8 @@ var eventTimerId = null;
 function start() {
     exec(function (a) {
         var tempListeners = listeners.slice(0);
-        accel = new Acceleration(a.x, a.y, a.z, a.timestamp);
+        var accel = new Acceleration(a.x, a.y, a.z, a.timestamp, a.type);
+        accelValues[accel.type] = accel;
         for (var i = 0, l = tempListeners.length; i < l; i++) {
             tempListeners[i].win(accel);
         }
@@ -93,10 +94,12 @@ var accelerometer = {
      */
     getCurrentAcceleration: function (successCallback, errorCallback, options) {
         argscheck.checkArgs('fFO', 'accelerometer.getCurrentAcceleration', arguments);
+        var type = options && typeof options.type == 'number' ? (options.type || 0) : 0;
 
         if (cordova.platformId === "windowsphone") {
             exec(function (a) {
-                accel = new Acceleration(a.x, a.y, a.z, a.timestamp);
+                var accel = new Acceleration(a.x, a.y, a.z, a.timestamp, a.type);
+                accelValues[accel.type] = accel;
                 successCallback(accel);
             }, function (e) {
                 errorCallback(e);
@@ -107,8 +110,10 @@ var accelerometer = {
 
         var p;
         var win = function (a) {
-            removeListeners(p);
-            successCallback(a);
+            if (a.type == type) {
+                removeListeners(p);
+                successCallback(a);
+            }
         };
         var fail = function (e) {
             removeListeners(p);
@@ -137,6 +142,7 @@ var accelerometer = {
         argscheck.checkArgs('fFO', 'accelerometer.watchAcceleration', arguments);
         // Default interval (10 sec)
         var frequency = (options && options.frequency && typeof options.frequency == 'number') ? options.frequency : 10000;
+        var type = options && typeof options.type == 'number' ? (options.type || 0) : 0;
 
         // Keep reference to watch id, and report accel readings as often as defined in frequency
         var id = utils.createUUID();
@@ -151,6 +157,7 @@ var accelerometer = {
 
         timers[id] = {
             timer: window.setInterval(function () {
+                var accel = accelValues[type];
                 if (accel) {
                     successCallback(accel);
                 }
