@@ -125,7 +125,7 @@
 
 - (void)returnAccelInfo:(CMDeviceMotion *)motion
 {
-    NSTimeInterval timestamp = ([[NSDate date] timeIntervalSince1970] * 1000);
+    NSTimeInterval timestamp = motion.timestamp * 1000; //([[NSDate date] timeIntervalSince1970] * 1000);
     // Create an acceleration object
     NSMutableDictionary* accelProps = [NSMutableDictionary dictionaryWithCapacity:5];
 

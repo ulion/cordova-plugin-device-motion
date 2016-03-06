@@ -48,6 +48,9 @@ function start() {
     exec(function (a) {
         var tempListeners = listeners.slice(0);
         var accel = new Acceleration(a.x, a.y, a.z, a.timestamp, a.type);
+        var prevAccel = accelValues[accel.type];
+        if (prevAccel && prevAccel.timestamp == accel.timestamp)
+          return;
         accelValues[accel.type] = accel;
         for (var i = 0, l = tempListeners.length; i < l; i++) {
             tempListeners[i].win(accel);
